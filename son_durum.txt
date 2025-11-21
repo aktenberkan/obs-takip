@@ -1,1 +1,10 @@
-x
+Oran Çalışma Tipi Not
+25 Ara Sınav 80
+3,5 Kısa Sınav 65
+3,5 Kısa Sınav 68
+3,5 Kısa Sınav 55
+3,5 Kısa Sınav 68
+3,5 Kısa Sınav
+3,5 Kısa Sınav
+4 Kısa Sınav
+50 Final
