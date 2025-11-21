@@ -1,0 +1,39 @@
+name: OBS Not Kontrol Botu
+
+on:
+  schedule:
+    - cron: '*/30 * * * *' # Her 30 dakikada bir çalıştır
+  workflow_dispatch: # Manuel çalıştırmak için buton ekle
+
+jobs:
+  check_grades:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Depoyu Çek (Checkout)
+        uses: actions/checkout@v3
+
+      - name: Python Kur
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Kütüphaneleri Yükle
+        run: |
+          pip install -r requirements.txt
+
+      - name: Botu Çalıştır
+        env: # Secretları koda gönderiyoruz
+          OKUL_NO: ${{ secrets.OKUL_NO }}
+          OKUL_SIFRE: ${{ secrets.OKUL_SIFRE }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python main.py
+
+      - name: Değişiklik Varsa Kaydet (Commit & Push)
+        run: |
+          git config --global user.name 'GitHub Action Bot'
+          git config --global user.email 'action@github.com'
+          git add son_durum.txt
+          git commit -m "Notlar güncellendi" || echo "Değişiklik yok"
+          git push
