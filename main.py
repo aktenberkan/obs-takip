@@ -13,16 +13,16 @@ TG_TOKEN = os.environ["TG_TOKEN"]
 TG_CHAT_ID = os.environ["TG_CHAT_ID"]
 
 # --- SABİT AYARLAR ---
-LOGIN_URL = "https://obs.sakarya.edu.tr"
-NOT_URL = "https://obs.sakarya.edu.tr/ozluk/notlistesi"
+LOGIN_URL = "https://sabis.sakarya.edu.tr/"
+NOT_URL = "https://obs.sabis.sakarya.edu.tr/Ders"
 
 # ID'LER (Senin son çalışan kodundaki ID'leri buraya yaz)
-ID_USER_1 = "username_1" # Değiştir
-ID_PASS_1 = "password_1" # Değiştir
-ID_BTN_1  = "button_1"   # Değiştir
-ID_USER_2 = "username_2" # Değiştir (2. ekran varsa)
-ID_PASS_2 = "password_2" # Değiştir
-XPATH_BTN_2 = '//*[@id="login-form"]/div[3]/button' # Değiştir
+ID_USER_1 = "UserName" # Değiştir
+ID_PASS_1 = "Password" # Değiştir
+ID_BTN_1  = "btnLogin"   # Değiştir
+ID_USER_2 = "Username" # Değiştir (2. ekran varsa)
+ID_PASS_2 = "Password" # Değiştir
+XPATH_BTN_2 = '//*[@id="kt_login_form"]/div[4]/button' # Değiştir
 
 def telegram_gonder(mesaj):
     try:
@@ -103,4 +103,5 @@ def main():
         driver.quit()
 
 if __name__ == "__main__":
+
     main()
