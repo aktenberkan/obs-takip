@@ -72,11 +72,11 @@ def main():
 
         # 3. VERİYİ ÇEK
         # Tablo varsa tabloyu, yoksa body'i al
-        tablolar = driver.find_elements(By.TAG_NAME, "table")
-        if tablolar:
-            yeni_veri = max(tablolar, key=lambda t: len(t.text)).text
-        else:
-            yeni_veri = driver.find_element(By.TAG_NAME, "body").text
+# 3. VERİYİ ÇEK (GARANTİ YÖNTEM)
+        # Tablo seçimi yapmıyoruz, sayfanın tamamındaki yazıları alıyoruz.
+        # Böylece tüm dersler kesinlikle gelir.
+        time.sleep(3) # Sayfa iyice yüklensin
+        yeni_veri = driver.find_element(By.TAG_NAME, "body").text
             
         # 4. ESKİ VERİYLE KIYASLA
         eski_veri = ""
@@ -105,3 +105,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
