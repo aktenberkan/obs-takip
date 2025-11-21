@@ -2,7 +2,7 @@ name: OBS Not Kontrol Botu
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # Her 30 dakikada bir çalıştır
+    - cron: '*/15 * * * *' # Her 30 dakikada bir çalıştır
   workflow_dispatch: # Manuel çalıştırmak için buton ekle
 
 jobs:
