@@ -5,24 +5,24 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
-# --- GITHUB'DAN GELECEK BİLGİLER ---
-# Bu bilgileri kodun içine yazmıyoruz, GitHub Secrets'tan alacağız
+# --- THIS INFORMATIONS WILL COME FROM GITHUB ---
+#We will get this informations from Github Secrets
 KULLANICI_ADI = os.environ["OKUL_NO"]
 SIFRE = os.environ["OKUL_SIFRE"]
 TG_TOKEN = os.environ["TG_TOKEN"]
 TG_CHAT_ID = os.environ["TG_CHAT_ID"]
 
-# --- SABİT AYARLAR ---
+# --- CUSTOM SETTINGS  ---
 LOGIN_URL = "https://sabis.sakarya.edu.tr/"
 NOT_URL = "https://obs.sabis.sakarya.edu.tr/Ders"
 
-# ID'LER (Senin son çalışan kodundaki ID'leri buraya yaz)
-ID_USER_1 = "UserName" # Değiştir
-ID_PASS_1 = "Password" # Değiştir
-ID_BTN_1  = "btnLogin"   # Değiştir
-ID_USER_2 = "Username" # Değiştir (2. ekran varsa)
-ID_PASS_2 = "Password" # Değiştir
-XPATH_BTN_2 = '//*[@id="kt_login_form"]/div[4]/button' # Değiştir
+# ID'S
+ID_USER_1 = "UserName" 
+ID_PASS_1 = "Password" 
+ID_BTN_1  = "btnLogin"
+ID_USER_2 = "Username" 
+ID_PASS_2 = "Password" 
+XPATH_BTN_2 = '//*[@id="kt_login_form"]/div[4]/button' 
 
 def telegram_gonder(mesaj):
     try:
@@ -40,9 +40,9 @@ def butona_tikla_idsiz(driver):
     except: pass
 
 def main():
-    # --- HEADLESS (HAYALET) MOD AYARLARI ---
+    # --- HEADLESS MODE SETTINGS ---
     chrome_options = Options()
-    chrome_options.add_argument("--headless") # Ekransız mod
+    chrome_options.add_argument("--headless") # HEADLESS MODE
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
@@ -50,7 +50,7 @@ def main():
     driver = webdriver.Chrome(options=chrome_options)
     
     try:
-        # 1. GİRİŞ
+        # FIRST LOGIN
         print("Giriş yapılıyor...")
         driver.get(LOGIN_URL)
         time.sleep(3)
@@ -59,7 +59,7 @@ def main():
         driver.find_element(By.ID, ID_BTN_1).click()
         time.sleep(5)
 
-        # 2. NOT SAYFASI VE ÇİFT GİRİŞ KONTROLÜ
+        # NOTE AND  DUAL LOGIN CONTROL
         driver.get(NOT_URL)
         time.sleep(5)
 
@@ -70,15 +70,11 @@ def main():
             butona_tikla_idsiz(driver)
             time.sleep(5)
 
-        # 3. VERİYİ ÇEK
-        # Tablo varsa tabloyu, yoksa body'i al
-# 3. VERİYİ ÇEK (GARANTİ YÖNTEM)
-        # Tablo seçimi yapmıyoruz, sayfanın tamamındaki yazıları alıyoruz.
-        # Böylece tüm dersler kesinlikle gelir.
-        time.sleep(3) # Sayfa iyice yüklensin
+        # PULL DATA
+        time.sleep(3) 
         yeni_veri = driver.find_element(By.TAG_NAME, "body").text
             
-        # 4. ESKİ VERİYLE KIYASLA
+        # COMPARE LAST DATA
         eski_veri = ""
         if os.path.exists("son_durum.txt"):
             with open("son_durum.txt", "r", encoding="utf-8") as f:
@@ -86,11 +82,11 @@ def main():
 
         if yeni_veri != eski_veri:
             print("Değişiklik var!")
-            # Sadece dosya boş değilse (ilk çalışmada bildirim atmasın diye)
+            
             if eski_veri != "":
                 telegram_gonder("🚨 GITHUB BOTU: Notlarında değişiklik tespit ettim!")
             
-            # Yeni veriyi dosyaya kaydet
+            # SAVE NEW DATA
             with open("son_durum.txt", "w", encoding="utf-8") as f:
                 f.write(yeni_veri)
         else:
@@ -98,11 +94,12 @@ def main():
 
     except Exception as e:
         print(f"Hata: {e}")
-        # telegram_gonder(f"Bot hata aldı: {e}") # İstersen açabilirsin
+       
     finally:
         driver.quit()
 
 if __name__ == "__main__":
 
     main()
+
 
