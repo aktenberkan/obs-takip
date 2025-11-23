@@ -28,7 +28,7 @@ jobs:
           OKUL_SIFRE: ${{ secrets.OKUL_SIFRE }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
-        run: python main.py
+        run: python grade_tracker.py
 
       - name: Değişiklik Varsa Kaydet (Commit & Push)
         run: |
