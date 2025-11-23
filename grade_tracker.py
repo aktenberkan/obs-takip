@@ -1,5 +1,6 @@
 import os
 import time
+import hashlib
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -74,17 +75,26 @@ def main():
         time.sleep(3) 
         yeni_veri = driver.find_element(By.TAG_NAME, "body").text
             
-        # COMPARE LAST DATA
-        eski_veri = ""
-        if os.path.exists("son_durum.txt"):
-            with open("son_durum.txt", "r", encoding="utf-8") as f:
-                eski_veri = f.read()
+        # COMPARE WITH LAST DATA
+       yeni_hash = hashlib.md5(yeni_veri.encode('utf-8')).hexdigest()
 
-        if yeni_veri != eski_veri:
-            print("Değişiklik var!")
-            
-            if eski_veri != "":
-                telegram_gonder("🚨 GITHUB BOTU: Notlarında değişiklik tespit ettim!")
+    eski_hash = ""
+    if os.path.exists("son_durum.txt"):
+        with open("son_durum.txt", "r", encoding="utf-8") as f:
+            eski_hash = f.read().strip()
+
+    if yeni_hash != eski_hash:
+        print("Değişiklik var! (Hash değişti)")
+        
+       
+        if eski_hash != "":
+            telegram_gonder("🚨 NOTLARINDA DEĞİŞİKLİK VAR! Sisteme girip kontrol et.")
+        
+        # save HASH not notes
+        with open("son_durum.txt", "w", encoding="utf-8") as f:
+            f.write(yeni_hash)
+    else:
+        print("Değişiklik yok (Hash aynı).")
             
             # SAVE NEW DATA
             with open("son_durum.txt", "w", encoding="utf-8") as f:
@@ -101,5 +111,6 @@ def main():
 if __name__ == "__main__":
 
     main()
+
 
 
