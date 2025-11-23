@@ -76,40 +76,33 @@ def main():
         yeni_veri = driver.find_element(By.TAG_NAME, "body").text
             
         # COMPARE WITH LAST DATA
-       yeni_hash = hashlib.md5(yeni_veri.encode('utf-8')).hexdigest()
+        yeni_hash = hashlib.md5(yeni_veri.encode('utf-8')).hexdigest()
 
-    eski_hash = ""
-    if os.path.exists("son_durum.txt"):
-        with open("son_durum.txt", "r", encoding="utf-8") as f:
-            eski_hash = f.read().strip()
+        eski_hash = ""
+        # Dosya varsa eski hash'i oku
+        if os.path.exists("son_durum.txt"):
+            with open("son_durum.txt", "r", encoding="utf-8") as f:
+                eski_hash = f.read().strip()
 
-    if yeni_hash != eski_hash:
-        print("Değişiklik var! (Hash değişti)")
-        
-       
-        if eski_hash != "":
-            telegram_gonder("🚨 NOTLARINDA DEĞİŞİKLİK VAR! Sisteme girip kontrol et.")
-        
-        # save HASH not notes
-        with open("son_durum.txt", "w", encoding="utf-8") as f:
-            f.write(yeni_hash)
-    else:
-        print("Değişiklik yok (Hash aynı).")
+        if yeni_hash != eski_hash:
+            print(f"Değişiklik var! (Yeni Hash: {yeni_hash})")
             
-            # SAVE NEW DATA
+            # Eğer dosya boş değilse (ilk çalışma değilse) bildirim at
+            if eski_hash != "":
+                telegram_gonder("🚨 OBS BOTU: Notlarında değişiklik var! Hemen kontrol et.")
+            
+            # Dosyaya notları DEĞİL, sadece HASH kodunu kaydet (Gizlilik için)
             with open("son_durum.txt", "w", encoding="utf-8") as f:
-                f.write(yeni_veri)
+                f.write(yeni_hash)
         else:
-            print("Değişiklik yok.")
+            print("Değişiklik yok (Hash aynı).")
 
     except Exception as e:
-        print(f"Hata: {e}")
-       
+        print(f"Hata oluştu: {e}")
     finally:
         driver.quit()
 
 if __name__ == "__main__":
-
     main()
 
 
