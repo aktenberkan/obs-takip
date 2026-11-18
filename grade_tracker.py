@@ -98,8 +98,8 @@ def main():
             print("Değişiklik yok (Hash aynı).")
 
     except Exception as e:
-    print(f"Hata oluştu: {e}")
-    raise
+        print(f"Hata oluştu: {e}")
+        raise
     finally:
         driver.quit()
 
