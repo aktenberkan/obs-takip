@@ -1,12 +1,14 @@
 import json
 import os
 import time
+from collections import Counter, defaultdict
 from typing import Dict, List, Optional
 
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 
 # GitHub Actions Secrets
 KULLANICI_ADI = os.environ["OKUL_NO"]
@@ -26,30 +28,19 @@ ID_USER_2 = "Username"
 ID_PASS_2 = "Password"
 XPATH_BTN_2 = '//*[@id="kt_login_form"]/div[4]/button'
 
+# SABİS /Ders page: each course is rendered as a separate card.
+COURSE_CARD_SELECTOR = "div.card.card-custom.card-stretch"
+COURSE_CODE_SELECTOR = ".symbol-label"
+COURSE_NAME_SELECTOR = "a.font-size-h5, a.text-dark.font-weight-bolder"
+COURSE_TABLE_SELECTOR = "table.table"
+
 # The same file is committed by the existing GitHub Actions workflow.
 STATE_FILE = "son_durum.txt"
-STATE_FORMAT = "obs-grade-snapshot-v1"
-
-GRADE_HEADER_KEYWORDS = (
-    "not",
-    "vize",
-    "final",
-    "butunleme",
-    "basari",
-    "ortalama",
-    "puan",
-    "sinav",
-    "harf",
-    "quiz",
-    "odev",
-    "proje",
-    "sonuc",
-    "durum",
-)
+STATE_FORMAT = "obs-grade-snapshot-v2"
 
 
 def normalize_text(value: str) -> str:
-    """Collapse whitespace and normalize Turkish characters for header matching."""
+    """Collapse whitespace and normalize Turkish characters for comparisons."""
     value = " ".join((value or "").split()).strip().lower()
     translation = str.maketrans(
         {
@@ -62,6 +53,14 @@ def normalize_text(value: str) -> str:
         }
     )
     return value.translate(translation)
+
+
+def element_text(parent, selector: str) -> str:
+    """Return an element's normalized visible text, or an empty string."""
+    elements = parent.find_elements(By.CSS_SELECTOR, selector)
+    if not elements:
+        return ""
+    return " ".join(elements[0].text.split()).strip()
 
 
 def telegram_gonder(mesaj: str) -> None:
@@ -95,121 +94,113 @@ def butona_tikla_idsiz(driver) -> None:
 
 
 def find_grade_table_rows(driver) -> Dict[str, dict]:
-    """Read course names and grade-related columns from the SABİS grade table.
+    """Read grades from the individual course cards on SABİS /Ders.
 
-    The page is inspected through its table headers instead of hashing the whole
-    page. This keeps unrelated page changes from triggering grade alerts.
+    Actual page structure (confirmed from the supplied HTML):
+      card -> .symbol-label (course code)
+           -> a.font-size-h5 (course name)
+           -> table.table -> tbody tr -> td[ratio, assessment type, grade]
+
+    Duplicate assessment types are distinguished by their weight and occurrence
+    number, e.g. 'Proje / Tasarım (%7,2) #2'. Blank grades are deliberately
+    retained so a later blank-to-grade transition is detected.
     """
-    tables = driver.find_elements(By.TAG_NAME, "table")
+    cards = driver.find_elements(By.CSS_SELECTOR, COURSE_CARD_SELECTOR)
     courses: Dict[str, dict] = {}
 
-    for table in tables:
-        rows = table.find_elements(By.CSS_SELECTOR, "tr")
-        if len(rows) < 2:
+    for card in cards:
+        course_code = element_text(card, COURSE_CODE_SELECTOR)
+        course_name = element_text(card, COURSE_NAME_SELECTOR)
+        if not course_code and not course_name:
             continue
 
-        # Find a header row. Some pages use <thead>; others put the header in
-        # the first <tr>, so inspect the first few rows for recognizable labels.
-        header_index = None
-        headers = []
-        for row_index, row in enumerate(rows[:5]):
-            cells = row.find_elements(By.CSS_SELECTOR, "th, td")
-            candidate = [cell.text.strip() for cell in cells]
-            normalized = [normalize_text(cell) for cell in candidate]
-            has_course_header = any("ders" in item or "course" in item for item in normalized)
-            has_grade_header = any(
-                keyword in item
-                for item in normalized
-                for keyword in GRADE_HEADER_KEYWORDS
+        tables = card.find_elements(By.CSS_SELECTOR, COURSE_TABLE_SELECTOR)
+        if not tables:
+            # Ignore unrelated cards that happen to share some CSS classes.
+            continue
+
+        table = tables[0]
+        rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
+        if not rows:
+            # A fallback for a table whose rows are not wrapped in <tbody>.
+            rows = table.find_elements(By.CSS_SELECTOR, "tr")
+
+        parsed_rows = []
+        for row in rows:
+            cells = row.find_elements(By.CSS_SELECTOR, "td")
+            if len(cells) < 3:
+                continue
+
+            ratio = " ".join(cells[0].text.split()).strip()
+            assessment_type = " ".join(cells[1].text.split()).strip()
+            grade = " ".join(cells[2].text.split()).strip()
+            if not assessment_type:
+                continue
+
+            parsed_rows.append(
+                {
+                    "ratio": ratio,
+                    "assessment_type": assessment_type,
+                    "grade": grade,
+                }
             )
-            if has_course_header and has_grade_header:
-                header_index = row_index
-                headers = candidate
-                break
 
-        if header_index is None or not headers:
+        if not parsed_rows:
+            # A course card without assessable rows is not useful for tracking.
             continue
 
-        normalized_headers = [normalize_text(header) for header in headers]
+        # Count identical (assessment type, ratio) rows first. This makes labels
+        # unambiguous when a course has several projects/homeworks with same weight.
+        totals = Counter(
+            (normalize_text(item["assessment_type"]), normalize_text(item["ratio"]))
+            for item in parsed_rows
+        )
+        occurrences = defaultdict(int)
+        grade_values = {}
 
-        # Prefer a course-name column over a course-code column.
-        course_candidates = []
-        for index, header in enumerate(normalized_headers):
-            if "ders adi" in header or "course name" in header:
-                course_candidates.append((3, index))
-            elif header == "ders" or header == "course":
-                course_candidates.append((2, index))
-            elif "ders" in header or "course" in header:
-                course_candidates.append((1, index))
-        if not course_candidates:
-            continue
-        course_index = sorted(course_candidates, reverse=True)[0][1]
+        for item in parsed_rows:
+            assessment_type = item["assessment_type"]
+            ratio = item["ratio"]
+            identity = (normalize_text(assessment_type), normalize_text(ratio))
+            occurrences[identity] += 1
 
-        code_index = None
-        for index, header in enumerate(normalized_headers):
-            if index != course_index and (
-                "ders kodu" in header or header == "kod" or "course code" in header
-            ):
-                code_index = index
-                break
+            label = assessment_type
+            if ratio:
+                label += " (%{})".format(ratio)
+            if totals[identity] > 1:
+                label += " #{}".format(occurrences[identity])
 
-        grade_indexes = [
-            index
-            for index, header in enumerate(normalized_headers)
-            if index != course_index
-            and index != code_index
-            and any(keyword in header for keyword in GRADE_HEADER_KEYWORDS)
-        ]
-        if not grade_indexes:
-            continue
+            grade_values[label] = item["grade"]
 
-        for row in rows[header_index + 1 :]:
-            cells = row.find_elements(By.CSS_SELECTOR, "th, td")
-            values = [" ".join(cell.text.split()).strip() for cell in cells]
-            if len(values) <= course_index:
-                continue
+        # Course code remains the stable identity across runs. Course name is
+        # used as a fallback in case the page omits the code.
+        course_key = course_code or course_name
+        unique_key = course_key
+        suffix = 2
+        while unique_key in courses:
+            unique_key = "{}#{}".format(course_key, suffix)
+            suffix += 1
 
-            course_name = values[course_index]
-            if not course_name:
-                continue
-
-            course_code = ""
-            if code_index is not None and len(values) > code_index:
-                course_code = values[code_index]
-
-            grade_values = {}
-            for index in grade_indexes:
-                if index >= len(values):
-                    continue
-                label = headers[index].strip() or "Not alanı {}".format(index + 1)
-                grade_values[label] = values[index]
-
-            # A course code is a more stable key if SABİS provides one.
-            course_key = course_code or course_name
-            unique_key = course_key
-            suffix = 2
-            while unique_key in courses:
-                unique_key = "{}#{}".format(course_key, suffix)
-                suffix += 1
-
-            courses[unique_key] = {
-                "name": course_name,
-                "code": course_code,
-                "grades": grade_values,
-            }
+        courses[unique_key] = {
+            "name": course_name or course_code or "Bilinmeyen ders",
+            "code": course_code,
+            "grades": grade_values,
+        }
 
     if not courses:
         raise RuntimeError(
-            "SABİS sayfasında ders/not tablosu otomatik olarak bulunamadı. "
-            "Giriş başarılı olsa bile tablo yapısı değişmiş veya notlar bir HTML "
-            "tablosu yerine farklı bir bileşende gösteriliyor olabilir."
+            "SABİS girişinden sonra ders kartları okunamadı. "
+            "Beklenen kart seçicisi: '{}'. Sayfa URL: {}. "
+            "Girişin tamamlandığını ve /Ders sayfasının açıldığını kontrol edin."
+            .format(COURSE_CARD_SELECTOR, driver.current_url)
         )
 
+    print("{} ders kartı ve not satırları okundu.".format(len(courses)))
     return courses
 
 
 def load_old_snapshot() -> Optional[dict]:
-    """Load the structured snapshot; return None for the old MD5-only format."""
+    """Load structured state; return None for old MD5 / older JSON formats."""
     if not os.path.exists(STATE_FILE):
         return None
 
@@ -217,7 +208,7 @@ def load_old_snapshot() -> Optional[dict]:
         with open(STATE_FILE, "r", encoding="utf-8") as file:
             data = json.load(file)
     except (json.JSONDecodeError, OSError):
-        # The previous version stored only an MD5 hash in this file.
+        # Earlier versions stored only an MD5 hash or a different state format.
         return None
 
     if not isinstance(data, dict) or data.get("format") != STATE_FORMAT:
@@ -236,20 +227,21 @@ def save_snapshot(courses: Dict[str, dict]) -> None:
 
 def make_course_message(old_course: Optional[dict], new_course: dict) -> str:
     course_name = new_course.get("name", "Bilinmeyen ders")
+    course_code = new_course.get("code", "")
     old_grades = (old_course or {}).get("grades", {})
     new_grades = new_course.get("grades", {})
 
+    course_lines = ["📚 Ders: {}".format(course_name)]
+    if course_code:
+        course_lines.append("🔖 Kod: {}".format(course_code))
+
     if old_course is None:
-        lines = [
-            "🆕 Yeni ders/not kaydı",
-            "📚 Ders: {}".format(course_name),
-            "📝 Not bilgileri:",
-        ]
+        lines = ["🆕 Yeni ders kaydı"] + course_lines + ["📝 Mevcut not bilgileri:"]
         for label, value in new_grades.items():
             if value:
                 lines.append("• {}: {}".format(label, value))
-        if len(lines) == 3:
-            lines.append("• Henüz not bilgisi girilmemiş.")
+        if len(lines) == len(course_lines) + 2:
+            lines.append("• Henüz not girilmemiş.")
         return "\n".join(lines)
 
     changed_fields = []
@@ -260,37 +252,34 @@ def make_course_message(old_course: Optional[dict], new_course: dict) -> str:
         if old_value != new_value:
             old_display = old_value if old_value else "—"
             new_display = new_value if new_value else "—"
-            changed_fields.append("• {}: {} → {}".format(label, old_display, new_display))
+            changed_fields.append(
+                "• {}: {} → {}".format(label, old_display, new_display)
+            )
 
     if not changed_fields:
         return ""
 
     return "\n".join(
-        [
-            "🚨 SABİS NOT GÜNCELLEMESİ",
-            "📚 Ders: {}".format(course_name),
-            "📝 Değişen notlar:",
-        ]
-        + changed_fields
+        ["🚨 SABİS NOT GÜNCELLEMESİ"] + course_lines + ["📝 Değişen notlar:"] + changed_fields
     )
 
 
 def find_changes(old_snapshot: Optional[dict], new_courses: Dict[str, dict]) -> List[str]:
-    # The old version stored a single MD5 hash, so it cannot tell us which
-    # course changed. The first run with this version only creates a baseline.
+    # Old MD5-only / older JSON snapshots cannot identify individual grades.
+    # The first run with this format creates a baseline without a mass alert.
     if old_snapshot is None:
-        print("İlk yapılandırılmış kayıt oluşturuluyor; bu çalışmada bildirim gönderilmeyecek.")
+        print(
+            "İlk yeni formatlı kayıt oluşturuluyor; bu çalışmada bildirim gönderilmeyecek."
+        )
         return []
 
     old_courses = old_snapshot.get("courses", {})
     messages = []
-
     for course_key, new_course in new_courses.items():
         old_course = old_courses.get(course_key)
         message = make_course_message(old_course, new_course)
         if message:
             messages.append(message)
-
     return messages
 
 
@@ -331,7 +320,7 @@ def main() -> None:
 
         print("Not sayfası açılıyor...")
         driver.get(NOT_URL)
-        time.sleep(5)
+        time.sleep(3)
 
         if driver.find_elements(By.ID, ID_USER_2):
             print("İkinci giriş ekranı tamamlanıyor...")
@@ -340,7 +329,13 @@ def main() -> None:
             butona_tikla_idsiz(driver)
             time.sleep(5)
 
-        time.sleep(3)
+        # Wait for SABİS to finish rendering its course cards before parsing.
+        WebDriverWait(driver, 20).until(
+            lambda current_driver: current_driver.find_elements(
+                By.CSS_SELECTOR, COURSE_CARD_SELECTOR
+            )
+        )
+
         new_courses = find_grade_table_rows(driver)
         old_snapshot = load_old_snapshot()
         messages = find_changes(old_snapshot, new_courses)
