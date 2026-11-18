@@ -1,58 +1,74 @@
-import os
-import time
-import hashlib
-import requests
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 
-# --- THIS INFORMATIONS WILL COME FROM GITHUB ---
-#We will get this informations from Github Secrets
-KULLANICI_ADI = os.environ["OKUL_NO"]
-SIFRE = os.environ["OKUL_SIFRE"]
-TG_TOKEN = os.environ["TG_TOKEN"]
-TG_CHAT_ID = os.environ["TG_CHAT_ID"]
+    
+  
+    for label in all_labels:
+        old_value = old_grades.get(label, "")
+        new_value = new_grades.get(label, "")
+        if old_value != new_value:
+            old_display = old_value if old_value else "—"
+            new_display = new_value if new_value else "—"
+            changed_fields.append("• {}: {} → {}".format(label, old_display, new_display))
 
-# --- CUSTOM SETTINGS  ---
-LOGIN_URL = "https://sabis.sakarya.edu.tr/"
-NOT_URL = "https://obs.sabis.sakarya.edu.tr/Ders"
+    if not changed_fields:
+        return ""
 
-# ID'S
-ID_USER_1 = "UserName" 
-ID_PASS_1 = "Password" 
-ID_BTN_1  = "btnLogin"
-ID_USER_2 = "Username" 
-ID_PASS_2 = "Password" 
-XPATH_BTN_2 = '//*[@id="kt_login_form"]/div[4]/button' 
+    return "\n".join(
+        [
+            "🚨 SABİS NOT GÜNCELLEMESİ",
+            "📚 Ders: {}".format(course_name),
+            "📝 Değişen notlar:",
+        ]
+        + changed_fields
+    )
 
-def telegram_gonder(mesaj):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage", 
-                      data={"chat_id": TG_CHAT_ID, "text": mesaj})
-    except: pass
 
-def butona_tikla_idsiz(driver):
-    """Yedek tıklama yöntemleri"""
-    try: driver.find_element(By.XPATH, XPATH_BTN_2).click(); return
-    except: pass
-    try: driver.find_element(By.XPATH, "//button[@type='submit']").click(); return
-    except: pass
-    try: driver.find_element(By.XPATH, "//*[contains(text(), 'Giriş')]").click(); return
-    except: pass
+def find_changes(old_snapshot: Optional[dict], new_courses: Dict[str, dict]) -> List[str]:
+    # The old version stored a single MD5 hash, so it cannot tell us which
+    # course changed. The first run with this version only creates a baseline.
+    if old_snapshot is None:
+        print("İlk yapılandırılmış kayıt oluşturuluyor; bu çalışmada bildirim gönderilmeyecek.")
+        return []
 
-def main():
-    # --- HEADLESS MODE SETTINGS ---
+    old_courses = old_snapshot.get("courses", {})
+    messages = []
+
+    for course_key, new_course in new_courses.items():
+        old_course = old_courses.get(course_key)
+        message = make_course_message(old_course, new_course)
+        if message:
+            messages.append(message)
+
+    return messages
+
+
+def send_messages_in_chunks(messages: List[str]) -> None:
+    if not messages:
+        return
+
+    header = "🎓 OBS NOT TAKİP BİLDİRİMİ\n\n"
+    current = header
+    for message in messages:
+        addition = message + "\n\n"
+        if len(current) + len(addition) > 3800 and current != header:
+            telegram_gonder(current.rstrip())
+            current = header
+        current += addition
+
+    if current != header:
+        telegram_gonder(current.rstrip())
+
+
+def main() -> None:
     chrome_options = Options()
-    chrome_options.add_argument("--headless") # HEADLESS MODE
+    chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
-    
+
     driver = webdriver.Chrome(options=chrome_options)
-    
+
     try:
-        # FIRST LOGIN
-        print("Giriş yapılıyor...")
+        print("SABİS'e giriş yapılıyor...")
         driver.get(LOGIN_URL)
         time.sleep(3)
         driver.find_element(By.ID, ID_USER_1).send_keys(KULLANICI_ADI)
@@ -60,51 +76,39 @@ def main():
         driver.find_element(By.ID, ID_BTN_1).click()
         time.sleep(5)
 
-        # NOTE AND  DUAL LOGIN CONTROL
+        print("Not sayfası açılıyor...")
         driver.get(NOT_URL)
         time.sleep(5)
 
-        if len(driver.find_elements(By.ID, ID_USER_2)) > 0:
-            print("İkinci giriş ekranı aşılyor...")
+        if driver.find_elements(By.ID, ID_USER_2):
+            print("İkinci giriş ekranı tamamlanıyor...")
             driver.find_element(By.ID, ID_USER_2).send_keys(KULLANICI_ADI)
             driver.find_element(By.ID, ID_PASS_2).send_keys(SIFRE)
             butona_tikla_idsiz(driver)
             time.sleep(5)
 
-        # PULL DATA
-        time.sleep(3) 
-        yeni_veri = driver.find_element(By.TAG_NAME, "body").text
-            
-        # COMPARE WITH LAST DATA
-        yeni_hash = hashlib.md5(yeni_veri.encode('utf-8')).hexdigest()
+        time.sleep(3)
+        new_courses = find_grade_table_rows(driver)
+        old_snapshot = load_old_snapshot()
+        messages = find_changes(old_snapshot, new_courses)
 
-        eski_hash = ""
-        # Dosya varsa eski hash'i oku
-        if os.path.exists("son_durum.txt"):
-            with open("son_durum.txt", "r", encoding="utf-8") as f:
-                eski_hash = f.read().strip()
+        # Send first. If Telegram fails, do not update the stored snapshot;
+        # the next scheduled run can retry the notification.
+        send_messages_in_chunks(messages)
+        save_snapshot(new_courses)
 
-        if yeni_hash != eski_hash:
-            print(f"Değişiklik var! (Yeni Hash: {yeni_hash})")
-            
-            # Eğer dosya boş değilse (ilk çalışma değilse) bildirim at
-            if eski_hash != "":
-                telegram_gonder("🚨 OBS BOTU: Notlarında değişiklik var! Hemen kontrol et.")
-            
-            # Dosyaya notları DEĞİL, sadece HASH kodunu kaydet (Gizlilik için)
-            with open("son_durum.txt", "w", encoding="utf-8") as f:
-                f.write(yeni_hash)
+        if messages:
+            print("{} ders için değişiklik bildirimi gönderildi.".format(len(messages)))
         else:
-            print("Değişiklik yok (Hash aynı).")
+            print("Not değişikliği yok veya ilk kayıt oluşturuldu.")
 
-    except Exception as e:
-        print(f"Hata oluştu: {e}")
+    except Exception as exc:
+        print("Hata oluştu: {}".format(exc))
         raise
     finally:
         driver.quit()
 
+
 if __name__ == "__main__":
     main()
-
-
 
