@@ -34,7 +34,8 @@ COURSE_CODE_SELECTOR = ".symbol-label"
 COURSE_NAME_SELECTOR = "a.font-size-h5, a.text-dark.font-weight-bolder"
 COURSE_TABLE_SELECTOR = "table.table"
 
-# The same file is committed by the existing GitHub Actions workflow.
+# This state file exists only in the runner workspace and is synchronized
+# to the user's separate PRIVATE state repository by the workflow.
 STATE_FILE = "son_durum.txt"
 STATE_FORMAT = "obs-grade-snapshot-v2"
 
